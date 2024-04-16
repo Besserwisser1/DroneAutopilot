@@ -9,16 +9,18 @@ class joystick_handler(object):
         self.joy = pygame.joystick.Joystick(id)
         self.name = self.joy.get_name()
         self.joy.init()
-        self.numaxes = min(4, self.joy.get_numaxes())
+        self.numaxes = self.joy.get_numaxes()
+        self.numhats = self.joy.get_numhats()
 
         self.axes = [0.0] * self.numaxes
-
+        self.hats = [0] * self.numhats
 
     def update(self):
         pygame.event.pump()
         for i in range(self.numaxes):
             self.axes[i] = round(self.joy.get_axis(i), 3)
-    
+        for i in range(self.numhats):
+            self.hats[i] = self.joy.get_hat(i)
 
 
 class input_test(object):
