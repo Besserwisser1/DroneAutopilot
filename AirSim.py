@@ -1,68 +1,81 @@
 import AirSimMS.PythonClient.multirotor.setup_path
 import airsim
-
 import numpy as np
 import os
 import tempfile
 import pprint
 import cv2
-
 import time
 import math
 import random
 
-# connect to the AirSim simulator
-client = airsim.MultirotorClient()
-client.confirmConnection()
-client.enableApiControl(True)
+class AirSimInitializer(airsim.MultirotorClient):
+    def __init__(self):
+        airsim.MultirotorClient.__init__(self)
+        self.confirmConnection()
+        self.enableApiControl(True)
 
-state = client.getMultirotorState()
-s = pprint.pformat(state)
-print("state: %s" % s)
+        state = self.getMultirotorState()
+        print("state: %s" % pprint.pformat(state))
 
-imu_data = client.getImuData()
-s = pprint.pformat(imu_data)
-print("imu_data: %s" % s)
+        imu_data = self.getImuData()
+        print("imu_data: %s" % pprint.pformat(imu_data))
 
-barometer_data = client.getBarometerData()
-s = pprint.pformat(barometer_data)
-print("barometer_data: %s" % s)
+        barometer_data = self.getBarometerData()
+        print("barometer_data: %s" % pprint.pformat(barometer_data))
 
-magnetometer_data = client.getMagnetometerData()
-s = pprint.pformat(magnetometer_data)
-print("magnetometer_data: %s" % s)
+        magnetometer_data = self.getMagnetometerData()
+        print("magnetometer_data: %s" % pprint.pformat(magnetometer_data))
 
-gps_data = client.getGpsData()
-s = pprint.pformat(gps_data)
-print("gps_data: %s" % s)
+        gps_data = self.getGpsData()
+        print("gps_data: %s" % pprint.pformat(gps_data))
 
-airsim.wait_key('Press any key to takeoff')
-print("Taking off...")
-client.armDisarm(True)
-client.takeoffAsync().join()
+        airsim.wait_key('Press any key to takeoff')
+        print("Taking off...")
+        self.armDisarm(True)
+        self.takeoffAsync().join()
 
-state = client.getMultirotorState()
-print("state: %s" % pprint.pformat(state))
+        state = self.getMultirotorState()
+        print("state: %s" % pprint.pformat(state))
 
-def moveByRollPitchYawThrottleAsync(roll, pitch, yaw, throttle):
-    client.moveByRollPitchYawThrottleAsync(roll, pitch, yaw, throttle, 0.1).join()
-    
-def get_imu():
-    state = client.getMultirotorState()
-    roll = state.rc_data.roll
-    pitch = state.rc_data.pitch
-    yaw = state.rc_data.yaw
-    barometer_data = client.getBarometerData()
-    altitude = barometer_data.altitude
-    print(f"Altitude: {altitude}")
+class AirSimController(AirSimInitializer):
+    def get_imu(self):
+        state = self.getMultirotorState()
+        roll = state.rc_data.roll
+        pitch = state.rc_data.pitch
+        yaw = state.rc_data.yaw
+        barometer_data = self.getBarometerData()
+        altitude = barometer_data.altitude
+        print(f"Altitude: {altitude}")
 
-    position = state.kinematics_estimated.position
-    x = position.x_val
-    y = position.y_val
-    z = position.z_val
-    print(f"Drone coordinates X: {x}, Y: {y}, Z: {z}")
-    return roll, pitch, yaw, altitude, x, y, z
+        position = state.kinematics_estimated.position
+        x = position.x_val
+        y = position.y_val
+        z = position.z_val
+        print(f"Drone coordinates X: {x}, Y: {y}, Z: {z}")
+        return roll, pitch, yaw, altitude, x, y, z
 
+    def moveByRollPitchYawThrottleAsync(self, roll, pitch, yaw, throttle):
+        super().moveByRollPitchYawThrottleAsync(roll, pitch, yaw, throttle, 0.1).join()
+
+class DroneController(AirSimController):
+    def __init__(self, flight_altitude=122, h_error=0.1, delta_throttle=0.1, SBUS_min=-1, SBUS_mid=0, SBUS_max=1):
+        super().__init__()
+        self.autopilot = StaticAutopilot(flight_altitude, h_error, delta_throttle, SBUS_min, SBUS_mid, SBUS_max)
+
+    def generateWindDeviation(self):
+        roll_deviation = random.uniform(-0.5, 0.5)
+        pitch_deviation = random.uniform(-0.1, 0.1)
+        yaw_deviation = random.uniform(-0.1, 0.1)
+        return roll_deviation, pitch_deviation, yaw_deviation
+
+    def run(self):
+        while True:
+            roll, pitch, yaw, altitude, x, y, z = self.get_imu()
+            roll_deviation, pitch_deviation, yaw_deviation = self.generateWindDeviation()
+            sbus_command = self.autopilot.fly(MavLink(roll + roll_deviation, pitch + pitch_deviation, yaw + yaw_deviation, altitude), self.get_imu)
+            self.moveByRollPitchYawThrottleAsync(sbus_command.roll, sbus_command.pitch, sbus_command.yaw, sbus_command.throttle)
+            time.sleep(0.05)
 
 class BB:
     '''bounding box'''
@@ -174,15 +187,6 @@ def generateWindDeviation():
     yaw_deviation = random.uniform(-0.1, 0.1)
     return roll_deviation, pitch_deviation, yaw_deviation
 
-autopilot = StaticAutopilot(flight_altitude = 122, h_error = 0.1, delta_throttle = 0.1, SBUS_min = -1, SBUS_mid = 0, SBUS_max = 1)
-
-while True:
-    roll, pitch, yaw, altitude, x, y, z = get_imu()
-
-    roll_deviation, pitch_deviation, yaw_deviation = generateWindDeviation()
-
-    sbus_command = autopilot.fly(MavLink(roll + roll_deviation, pitch + pitch_deviation, yaw + yaw_deviation, altitude), get_imu)
-
-    moveByRollPitchYawThrottleAsync(sbus_command.roll, sbus_command.pitch, sbus_command.yaw, sbus_command.throttle)
-
-    time.sleep(0.05)
+if __name__ == "__main__":
+    drone_controller = DroneController()
+    drone_controller.run()
