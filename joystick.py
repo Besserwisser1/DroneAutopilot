@@ -42,8 +42,18 @@ class input_test(object):
             pygame.time.wait(1000)
 
     def print_joystick_data(self, joy):
+        roll = joy.axes[0]
+        pitch = joy.axes[1]
+        yaw = joy.axes[2]
+        throttle = joy.axes[3]
+        toggles = joy.axes[6]
+
         print("Joystick:", joy.name)
-        print("Axes:", joy.axes)
+        print("Roll:", roll)
+        print("Pitch:", pitch)
+        print("Yaw:", yaw)
+        print("Throttle:", throttle)
+        print("Toggle switches:", toggles)
         print()
 
 
