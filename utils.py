@@ -54,3 +54,19 @@ class SBUS:
     @staticmethod
     def from_array(arr):
         return SBUS(arr[0], arr[1], arr[2], arr[3])
+    
+
+class PID:
+    def __init__(self, Kp=1.0, Ki=0.0, Kd=0.0):
+        self.Kp = Kp
+        self.Ki = Ki
+        self.Kd = Kd
+        self.previous_error = 0.0
+        self.integral = 0.0
+
+    def update(self, error, delta_time):
+        self.integral += error * delta_time
+        derivative = (error - self.previous_error) / delta_time
+        output = self.Kp * error + self.Ki * self.integral + self.Kd * derivative
+        self.previous_error = error
+        return output
