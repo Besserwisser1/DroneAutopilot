@@ -7,6 +7,10 @@ import tempfile
 import pprint
 import cv2
 
+import time
+import math
+import random
+
 # connect to the AirSim simulator
 client = airsim.MultirotorClient()
 client.confirmConnection()
@@ -40,8 +44,6 @@ client.takeoffAsync().join()
 state = client.getMultirotorState()
 print("state: %s" % pprint.pformat(state))
 
-
-
 def moveByRollPitchYawThrottleAsync(roll, pitch, yaw, throttle):
     client.moveByRollPitchYawThrottleAsync(roll, pitch, yaw, throttle, 0.1).join()
     
@@ -52,12 +54,15 @@ def get_imu():
     yaw = state.rc_data.yaw
     barometer_data = client.getBarometerData()
     altitude = barometer_data.altitude
-    print(altitude)
-    return roll, pitch, yaw, altitude
+    print(f"Altitude: {altitude}")
 
-airsim.wait_key('Press any key to start')
-import time
-import math
+    position = state.kinematics_estimated.position
+    x = position.x_val
+    y = position.y_val
+    z = position.z_val
+    print(f"Drone coordinates X: {x}, Y: {y}, Z: {z}")
+    return roll, pitch, yaw, altitude, x, y, z
+
 
 class BB:
     '''bounding box'''
@@ -104,12 +109,23 @@ class SBUS:
     def from_array(arr):
         return SBUS(arr[0], arr[1], arr[2], arr[3])
 
+class PID:
+    def __init__(self, Kp=1.0, Ki=0.0, Kd=0.0):
+        self.Kp = Kp
+        self.Ki = Ki
+        self.Kd = Kd
+        self.previous_error = 0.0
+        self.integral = 0.0
+
+    def update(self, error, delta_time):
+        self.integral += error * delta_time
+        derivative = (error - self.previous_error) / delta_time
+        output = self.Kp * error + self.Ki * self.integral + self.Kd * derivative
+        self.previous_error = error
+        return output
+
 class StaticAutopilot:
-    """                (flight_altitude)                           (                               .                     )
-    SBUS_min, SBUS_mid, SBUS_max, max_angular_velocity                            
-              throttle                                    
-    """
-    def __init__(self, flight_altitude = 123, h_error = 1.0, delta_throttle = 0.5, SBUS_min = 173, SBUS_mid = 993, SBUS_max = 1810, max_angular_velocity = 360):
+    def __init__(self, flight_altitude = 123, h_error = 1.0, delta_throttle = 0.5, SBUS_min = 173, SBUS_mid = 1110, SBUS_max = 2047, max_angular_velocity = 360):
         self.flight_altitude = flight_altitude
         self.h_error = abs(h_error)
         self.min_h = self.flight_altitude - self.h_error
@@ -120,80 +136,53 @@ class StaticAutopilot:
         self.SBUS_max = SBUS_max
         self.SBUS_range = min(self.SBUS_max - self.SBUS_mid, self.SBUS_mid - self.SBUS_min)
         self.max_angular_velocity = max_angular_velocity
-        self.throttle = SBUS_min
+        self.throttle = 0.595
+        self.pid_altitude = PID(Kp=0.5, Ki=0.01, Kd=0.05)
+        self.pid_roll = PID(Kp=0.05, Ki=0.01, Kd=0.08)
+        self.pid_pitch = PID(Kp=0.05, Ki=0.01, Kd=0.05)
+        self.pid_yaw = PID(Kp=0.05, Ki=0.01, Kd=0.05)
+        self.start_time = time.time()
+        self.start_x = None
+        self.start_y = None
+        self.start_z = None
 
-    def fly(self, telemetry):
-        if telemetry.h < self.min_h:
-            #self.throttle += self.delta_throttle
-            self.throttle = min(1.0, self.throttle + self.delta_throttle)
-        elif telemetry.h > self.max_h:
-            #self.throttle -= self.delta_throttle
-            self.throttle = max(0.0, self.throttle - self.delta_throttle)
+    def fly(self, telemetry, get_imu):
+        error_h = self.flight_altitude - telemetry.h
+        self.throttle += self.pid_altitude.update(error_h, 0.1)
+        self.throttle = min(max(self.throttle, 0.59), 0.595)  
+
+        if self.start_x is None:
+            _, _, _, _, self.start_x, self.start_y, self.start_z = get_imu()
+
+        _, _, _, _, x, y, z = get_imu()
+
+        error_x = self.start_x - x
+        error_y = self.start_y - y
+        error_z = self.start_z - z
 
         throttle = self.throttle
-        roll = self.SBUS_mid - telemetry.roll/math.pi*180/self.max_angular_velocity*self.SBUS_range
-        pitch = self.SBUS_mid - telemetry.pitch/math.pi*180/self.max_angular_velocity*self.SBUS_range
-        yaw = self.SBUS_mid - telemetry.yaw/math.pi*180/self.max_angular_velocity*self.SBUS_range
+
+        roll = self.SBUS_mid - self.pid_roll.update(error_y, 0.1) / math.pi * 180 / self.max_angular_velocity * self.SBUS_range
+        pitch = self.SBUS_mid - self.pid_pitch.update(error_x, 0.1) / math.pi * 180 / self.max_angular_velocity * self.SBUS_range
+        yaw = self.SBUS_mid - self.pid_yaw.update(error_z, 0.1) / math.pi * 180 / self.max_angular_velocity * self.SBUS_range
+        print(f"throttle: {throttle}, roll: {roll}, pitch: {pitch}, yaw: {yaw}")
         return SBUS(throttle, roll, pitch, yaw)
-    
-autopilot = StaticAutopilot()
+
+def generateWindDeviation():
+    roll_deviation = random.uniform(-0.5, 0.5)
+    pitch_deviation = random.uniform(-0.1, 0.1)
+    yaw_deviation = random.uniform(-0.1, 0.1)
+    return roll_deviation, pitch_deviation, yaw_deviation
+
+autopilot = StaticAutopilot(flight_altitude = 122, h_error = 0.1, delta_throttle = 0.1, SBUS_min = -1, SBUS_mid = 0, SBUS_max = 1)
+
 while True:
-    roll, pitch, yaw, altitude = get_imu()
-        
-    sbus_command = autopilot.fly(MavLink(roll, pitch, yaw, altitude))
-        
+    roll, pitch, yaw, altitude, x, y, z = get_imu()
+
+    roll_deviation, pitch_deviation, yaw_deviation = generateWindDeviation()
+
+    sbus_command = autopilot.fly(MavLink(roll + roll_deviation, pitch + pitch_deviation, yaw + yaw_deviation, altitude), get_imu)
+
     moveByRollPitchYawThrottleAsync(sbus_command.roll, sbus_command.pitch, sbus_command.yaw, sbus_command.throttle)
-        
-    time.sleep(0.1)
 
-
-'''
-airsim.wait_key('Press any key to move vehicle to (-10, 10, -10) at 5 m/s')
-client.moveToPositionAsync(-10, 10, -10, 5).join()
-
-client.hoverAsync().join()
-
-state = client.getMultirotorState()
-print("state: %s" % pprint.pformat(state))
-
-airsim.wait_key('Press any key to take images')
-# get camera images from the car
-responses = client.simGetImages([
-    airsim.ImageRequest("0", airsim.ImageType.DepthVis),  #depth visualization image
-    airsim.ImageRequest("1", airsim.ImageType.DepthPerspective, True), #depth in perspective projection
-    airsim.ImageRequest("1", airsim.ImageType.Scene), #scene vision image in png format
-    airsim.ImageRequest("1", airsim.ImageType.Scene, False, False)])  #scene vision image in uncompressed RGBA array
-print('Retrieved images: %d' % len(responses))
-
-tmp_dir = os.path.join(tempfile.gettempdir(), "airsim_drone")
-print ("Saving images to %s" % tmp_dir)
-try:
-    os.makedirs(tmp_dir)
-except OSError:
-    if not os.path.isdir(tmp_dir):
-        raise
-
-for idx, response in enumerate(responses):
-
-    filename = os.path.join(tmp_dir, str(idx))
-
-    if response.pixels_as_float:
-        print("Type %d, size %d" % (response.image_type, len(response.image_data_float)))
-        airsim.write_pfm(os.path.normpath(filename + '.pfm'), airsim.get_pfm_array(response))
-    elif response.compress: #png format
-        print("Type %d, size %d" % (response.image_type, len(response.image_data_uint8)))
-        airsim.write_file(os.path.normpath(filename + '.png'), response.image_data_uint8)
-    else: #uncompressed array
-        print("Type %d, size %d" % (response.image_type, len(response.image_data_uint8)))
-        img1d = np.fromstring(response.image_data_uint8, dtype=np.uint8) # get numpy array
-        img_rgb = img1d.reshape(response.height, response.width, 3) # reshape array to 4 channel image array H X W X 3
-        cv2.imwrite(os.path.normpath(filename + '.png'), img_rgb) # write to png
-
-airsim.wait_key('Press any key to reset to original state')
-
-client.reset()
-client.armDisarm(False)
-
-# that's enough fun for now. let's quit cleanly
-client.enableApiControl(False)
-'''
+    time.sleep(0.05)
