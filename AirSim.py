@@ -1,3 +1,6 @@
+import sys
+sys.path.append("..")
+
 import AirSimMS.PythonClient.multirotor.setup_path
 import airsim
 import numpy as np
@@ -70,3 +73,8 @@ class DroneController(AirSimInitializer):
             sbus_command = self.autopilot.fly(MavLink(roll + roll_deviation, pitch + pitch_deviation, yaw + yaw_deviation, altitude), self.get_imu)
             self.moveByRollPitchYawThrottleAsync(sbus_command.roll, sbus_command.pitch, sbus_command.yaw, sbus_command.throttle)
             time.sleep(0.05)
+
+
+if __name__ == "__main__":
+    controller = DroneController()
+    controller.run()
