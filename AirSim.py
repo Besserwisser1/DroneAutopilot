@@ -7,7 +7,6 @@ import numpy as np
 import pprint
 import time
 import random
-from autopilot import StaticAutopilot
 from utils import MavLink, PID
 
 class AirSimInitializer(airsim.MultirotorClient):
@@ -37,9 +36,9 @@ class AirSimInitializer(airsim.MultirotorClient):
         self.takeoffAsync().join()
 
 class DroneController(AirSimInitializer):
-    def __init__(self, flight_altitude=122, h_error=0.1, delta_throttle=0.1, SBUS_min=-1, SBUS_mid=0, SBUS_max=1):
+    def __init__(self):
         super().__init__()
-        self.autopilot = StaticAutopilot(flight_altitude, h_error, delta_throttle, SBUS_min, SBUS_mid, SBUS_max)
+        # self.autopilot = StaticAutopilot(flight_altitude, h_error, delta_throttle, SBUS_min, SBUS_mid, SBUS_max)
 
     def get_imu(self):
         state = self.getMultirotorState()
@@ -66,15 +65,19 @@ class DroneController(AirSimInitializer):
         yaw_deviation = random.uniform(-0.1, 0.1)
         return roll_deviation, pitch_deviation, yaw_deviation
 
-    def run(self):
-        while True:
-            roll, pitch, yaw, altitude, x, y, z = self.get_imu()
-            roll_deviation, pitch_deviation, yaw_deviation = self.generateWindDeviation()
-            sbus_command = self.autopilot.fly(MavLink(roll + roll_deviation, pitch + pitch_deviation, yaw + yaw_deviation, altitude), self.get_imu)
-            self.moveByRollPitchYawThrottleAsync(sbus_command.roll, sbus_command.pitch, sbus_command.yaw, sbus_command.throttle)
-            time.sleep(0.05)
-
 
 if __name__ == "__main__":
+    try:
+        from autopilot import StaticAutopilot
+    except ImportError:
+        print("No autopilot class found")
+        exit(1)
+    autopilot = StaticAutopilot(flight_altitude=122, h_error=0.1, delta_throttle=0.1, SBUS_min=-1, SBUS_mid=0, SBUS_max=1)
     controller = DroneController()
-    controller.run()
+
+    while True:
+        roll, pitch, yaw, altitude, x, y, z = controller.get_imu()
+        roll_deviation, pitch_deviation, yaw_deviation = controller.generateWindDeviation()
+        sbus_command = autopilot.fly(MavLink(roll + roll_deviation, pitch + pitch_deviation, yaw + yaw_deviation, altitude), controller.get_imu)
+        controller.moveByRollPitchYawThrottleAsync(sbus_command.roll, sbus_command.pitch, sbus_command.yaw, sbus_command.throttle)
+        time.sleep(0.05)
