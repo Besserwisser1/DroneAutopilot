@@ -23,7 +23,7 @@ class joystick_handler(object):
             self.hats[i] = self.joy.get_hat(i)
 
 
-class input_test(object):
+class JoystickData(object):
     def __init__(self):
         pygame.init()
         self.joycount = pygame.joystick.get_count()
@@ -35,17 +35,21 @@ class input_test(object):
             self.joy.append(joystick_handler(i))
 
     def run(self):
-        while True:
-            for joy in self.joy:
-                joy.update()
-                self.print_joystick_data(joy)
-            pygame.time.wait(1000)
+        for joy in self.joy:
+            joy.update()
+            self.print_joystick_data(joy)
+        roll = joy.axes[0]
+        pitch = joy.axes[1]
+        throttle = joy.axes[2]
+        yaw = joy.axes[3]
+        toggles = joy.axes[6]
+        return roll, pitch, yaw, throttle, toggles
 
     def print_joystick_data(self, joy):
         roll = joy.axes[0]
         pitch = joy.axes[1]
-        yaw = joy.axes[2]
-        throttle = joy.axes[3]
+        throttle = joy.axes[2]
+        yaw = joy.axes[3]
         toggles = joy.axes[6]
 
         print("Joystick:", joy.name)
@@ -58,5 +62,8 @@ class input_test(object):
 
 
 if __name__ == "__main__":
-    program = input_test()
-    program.run()
+    joystick = JoystickData()
+    while True:
+        joystick.run()
+        pygame.time.wait(10)
+    
