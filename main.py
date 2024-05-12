@@ -13,6 +13,7 @@ if __name__ == "__main__":
 
     while True:
         roll_joy, pitch_joy, yaw_joy, throttle_joy, toggles_joy = joystick.run()
+        throttle_joy = (throttle_joy + 0.75) / 1.75
         if toggles_joy == 1:
             roll, pitch, yaw, altitude, x, y, z = controller.get_imu()
             # roll_deviation, pitch_deviation, yaw_deviation = controller.generateWindDeviation()
